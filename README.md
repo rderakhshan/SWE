@@ -265,7 +265,7 @@ For rewards `r_i`, compute `A_i = (r_i - mean(r)) / (std(r) + epsilon)`. All-zer
 
 ## 8. Google Colab
 
-Open `notebooks/irina_grpo.ipynb`. It is a teaching notebook using the same Python pipeline as the CLI. Configure `REPO_URL` to the actual GitHub URL after publishing Irina. The default is `MODE = 'educational'`. Changing it to `realistic` selects the verifier backend; it does not install or enable Docker on Colab automatically. **Most hosted Colab runtimes do not provide a working Docker daemon**, so full isolated tool execution and realistic verification will fail closed until a supported runtime is provided. The notebook includes four Mermaid diagrams; GitHub renders Mermaid in Markdown, while Colab rendering may require a fallback.
+Open `notebooks/irina_grpo.ipynb`. It is a teaching notebook using the same Python pipeline as the CLI. Configure `REPO_URL` to the actual GitHub URL after publishing Irina. The default is `MODE = 'educational'`. Changing it to `realistic` selects the verifier backend; it does not install or enable Docker on Colab automatically. **Most hosted Colab runtimes do not provide a working Docker daemon**, so full isolated tool execution and realistic verification will fail closed until a supported runtime is provided. The notebook links to the four flowcharts defined in this README, because neither GitHub nor Colab renders Mermaid inside notebook markdown cells.
 
 ## 9. Module-by-module API guide
 
