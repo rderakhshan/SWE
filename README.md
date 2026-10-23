@@ -15,14 +15,14 @@ flowchart TD
     C --> D["② Prepare isolated execution workspace"]
     D --> E["Clone or locate repository"]
     E --> F["Checkout exact base_commit"]
-    F --> G["③ Initialize Irina harness"]
+    F --> G["③ Initialize Odysseus harness"]
 
     G --> H["Build system prompt and task context"]
     H --> I["Send conversation to local Qwen policy"]
     I --> J["Qwen generates response"]
     J --> K{"Tool call requested?"}
 
-    K -->|Yes| L["Irina parses tool name and arguments"]
+    K -->|Yes| L["Odysseus parses tool name and arguments"]
     L --> M["Apply tool security policy"]
     M --> N{"Tool permitted?"}
     N -->|No| O["Return BLOCKED observation"]
@@ -143,11 +143,11 @@ Default model: `Qwen/Qwen2.5-Coder-0.5B-Instruct`. Default mode: `educational`. 
 
 ```mermaid
 flowchart TD
-    A["① SWE-bench problem statement"] --> B["Irina builds conversation"]
+    A["① SWE-bench problem statement"] --> B["Odysseus builds conversation"]
     B --> C["② Qwen generates response"]
     C --> D{"Response type?"}
 
-    D -->|Tool call| E["③ Irina parses tool name and arguments"]
+    D -->|Tool call| E["③ Odysseus parses tool name and arguments"]
     E --> F["Apply tool security policy"]
     F --> G{"Tool permitted?"}
 
@@ -175,6 +175,18 @@ flowchart TD
 
     Q --> R["Save messages, generated tokens and logprobs"]
     R --> S["⑥ Collect candidate patch using git diff"]
+
+    classDef prep fill:#DBEAFE,stroke:#2563EB,color:#1E3A8A,stroke-width:2px
+    classDef agent fill:#EDE9FE,stroke:#7C3AED,color:#4C1D95,stroke-width:2px
+    classDef tools fill:#DCFCE7,stroke:#16A34A,color:#14532D,stroke-width:2px
+    classDef learn fill:#E5E7EB,stroke:#64748B,color:#1E293B,stroke-width:2px
+
+    class A,B prep
+    class C,D,E,F,G,H,O,P,Q agent
+    class I,J,K,L,M,N tools
+    class R,S learn
+
+    linkStyle default stroke:#94A3B8,stroke-width:1.5px
 ```
 
 `irina.loop.agent_loop` is the single orchestration loop. `irina.provider.RemoteProvider` supports an OpenAI-compatible remote endpoint; `irina.providers.qwen.QwenProvider` is the local trainable adapter. `irina.tools.Tools` implements `read_file`, `write_file`, `edit_file`, `list_files`, `grep`, and sandboxed `bash`. The path jail resolves symlinks before checking workspace containment. `irina.session.Session` records JSONL events and conversation snapshots. `irina.memory` loads `IRINA.md`, falling back to `ODYSSEUS.md`. `irina.skills` discovers `skills/*/SKILL.md`. `irina.context.compact` enforces a simple character budget. `irina.subagent.delegate` runs a child harness with the same workspace and policy. `irina.fleet.run_fleet` schedules independent harness jobs.
@@ -218,6 +230,20 @@ flowchart TD
     R --> T
     S --> U["Retry or exclude according to evaluation policy"]
     U --> T
+
+    classDef prep fill:#DBEAFE,stroke:#2563EB,color:#1E3A8A,stroke-width:2px
+    classDef synthetic fill:#DCFCE7,stroke:#16A34A,color:#14532D,stroke-width:2px
+    classDef verify fill:#FFEDD5,stroke:#EA580C,color:#7C2D12,stroke-width:2px
+    classDef error fill:#FEE2E2,stroke:#DC2626,color:#7F1D1D,stroke-width:2px
+    classDef learn fill:#E5E7EB,stroke:#64748B,color:#1E293B,stroke-width:2px
+
+    class A,B,C prep
+    class E,F,G,H synthetic
+    class I,J,K,L,M,N,O,P,Q,R verify
+    class D,S,U error
+    class T learn
+
+    linkStyle default stroke:#94A3B8,stroke-width:1.5px
 ```
 
 Synthetic rewards are reproducible from the experiment seed and rollout ID. Realistic rewards require official SWE-bench resolution status. Infrastructure errors must not be treated as ordinary unresolved patches. The official verifier is independent of the agent's working tree.
@@ -259,6 +285,20 @@ flowchart TD
     S --> T["Backpropagate through Qwen LoRA adapters"]
     T --> U["⑦ Optimizer step"]
     U --> V["Updated Qwen policy"]
+
+    classDef prep fill:#DBEAFE,stroke:#2563EB,color:#1E3A8A,stroke-width:2px
+    classDef agent fill:#EDE9FE,stroke:#7C3AED,color:#4C1D95,stroke-width:2px
+    classDef tools fill:#DCFCE7,stroke:#16A34A,color:#14532D,stroke-width:2px
+    classDef verify fill:#FFEDD5,stroke:#EA580C,color:#7C2D12,stroke-width:2px
+    classDef learn fill:#E5E7EB,stroke:#64748B,color:#1E293B,stroke-width:2px
+
+    class A,B prep
+    class C,D,E,F agent
+    class G,H,I,J tools
+    class K,L,M,N,O verify
+    class P,Q,R,S,T,U,V learn
+
+    linkStyle default stroke:#94A3B8,stroke-width:1.5px
 ```
 
 For rewards `r_i`, compute `A_i = (r_i - mean(r)) / (std(r) + epsilon)`. All-zero variance groups produce zero advantages and no meaningful policy update. Each assistant generation contributes generated-token loss, with rollout advantage shared across its turns. The implementation uses a clipped PPO/GRPO-style surrogate and does **not** claim to reproduce every variant of published GRPO (for example, no reference-model KL is enabled by default). For production research, validate importance ratios and sequence weighting against your target GRPO formulation.
