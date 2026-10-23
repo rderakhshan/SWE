@@ -2,11 +2,11 @@
 
 Irina connects three parts of coding-agent research in one Python project: a **readable agent harness** that operates on real repositories, a **SWE-bench Verified repair workflow** that produces candidate patches, and **group-relative policy optimization (GRPO)** that trains a local Qwen model from rollout rewards. Its two modes are designed to share the same agent and optimization path: `educational` substitutes seeded synthetic rewards for expensive benchmark verification, while `realistic` requests results from the official SWE-bench evaluator. This distinction makes the system useful both for studying the mechanics of agent training and for developing a correctness-based evaluation workflow. Synthetic rewards do **not** measure software-repair quality.
 
-> **Verification and provenance notice.** Irina is an **independent implementation inspired by a supplied Odysseus architecture and specification**; the original Odysseus Python source was not provided. It is therefore neither a line-for-line port nor a verified feature-preserving rename. Some features described by that specification—including mid-tool-call crash recovery, SSE browser approvals, and complete sub-agent skill integration—are not reproduced. Neither the full model-backed training flow nor official SWE-bench verification was executed in the packaging environment. Treat Irina as an inspectable research prototype, not a benchmark-certified or security-certified coding agent; actual runs require suitable models, dataset access, and Docker infrastructure.
+> **Current status.** Irina has a Python agent harness, a local Qwen provider, and code for grouped SWE-bench rollouts and LoRA updates. Local validation covered source compilation, unit tests, and CLI smoke checks. It did **not** cover a complete Qwen training run, live SWE-bench dataset access, Docker-backed repository repair, or official benchmark evaluation. The code is a research prototype; it is not a validated benchmark result or a hardened autonomous coding service.
 
 ## 1. The Closed Loop: How a Repository Repair Becomes a Learning Signal
 
-*This diagram follows the original Odysseus-inspired design, while the independently developed project is called Irina. The diagram is preserved exactly as supplied; references to “Odysseus” inside it denote the architectural origin, not a separate runtime or a claim of source-code equivalence.*
+*The diagram lays out the intended route from a benchmark issue to a patch, a reward, and a policy update. It is a conceptual overview; some of its steps go beyond what has been exercised in an end-to-end run.*
 
 ```mermaid
 flowchart TD
@@ -94,9 +94,9 @@ The diagram connects **repository repair, evidence collection, and learning**. Q
 
 ### Inside the Agent: How Irina Turns Intent into Controlled Actions
 
-This diagram describes the **agent harness as a system**, rather than only the benchmark-training pipeline. It traces entry through the CLI, Python API, or fleet scheduler; workspace and policy setup; optional session recovery; project memory and skill discovery; and the recurring model–tool interaction. The same architecture also provides bounded context, persistent execution records, and delegated work through sub-agents. Read it as the intended control flow of the harness, with the caveat that individual recovery and integration behaviors still require implementation-level verification.
+This diagram gives a wider view of the agent than the benchmark pipeline does: entry points, workspace tools, permissions, saved conversations, and delegation all appear in one place. The code implements these concerns in separate modules, but not every connection in the drawing is wired as shown. In particular, resuming uses the last saved conversation snapshot, not replay of an interrupted tool call, and tool-call parsing currently accepts one XML-wrapped JSON call per model response.
 
-The key feedback path is **tool observation → context-budget check → next model completion**. Context compaction is conditional, not automatic: it is considered when the conversation grows beyond its budget and enough earlier messages exist to summarize. The diagram also distinguishes a normal model answer from the final, tools-disabled call used when the turn limit is exhausted. Its branches show intended decisions; they should not be read as evidence that every edge has been exercised end to end.
+At the heart of the implementation is a short loop: the provider generates text, Irina looks for a single structured tool call, the policy checks it, and the tool result goes back into the conversation. There are a few important differences between the diagram and the current code. `Harness.run` compacts the conversation **once before** entering the loop, using a character budget and retaining recent messages; it does not summarize with another model call before every turn. If the turn limit is reached, `agent_loop` returns `reason='turn_limit'` rather than making a separate tools-disabled final call. The diagram is therefore best read as a broader design, not a line-by-line trace.
 
 ```mermaid
 flowchart TD
@@ -263,7 +263,7 @@ uv run irina -d ./my-project --mode yolo --docker -p 'Run the unit tests'
 uv run python -m irina.web -d ./my-project --port 3080
 ```
 
-The agent CLI is the **interactive and scripted entry point** to the harness, distinct from the GRPO training CLI below. Use `read-only` for inspection, `safe` when write or command approval is appropriate, and `yolo` only in a disposable, controlled workspace; explicit deny rules still apply in every mode. Shell execution requires a configured `DockerSandbox`, so selecting `yolo` does not silently enable unrestricted host commands. The included web entry point exposes a **read-only local form**, not the original Odysseus SSE/approval interface.
+The agent CLI runs ordinary coding tasks; the GRPO CLI below runs training experiments. `read-only` blocks writes and shell commands. In `safe` mode, writes and shell commands require an approval callback; without one, those operations are denied. `yolo` skips that approval check but does not bypass the explicit command deny list. Shell execution still needs a configured `DockerSandbox`. The small web interface serves a local, read-only form and displays the result; it does not stream tool events or present browser approval controls.
 
 ## 4. Run the Learning Experiment: Tasks, Rollouts, and Checkpoints
 
@@ -332,7 +332,7 @@ flowchart TD
     linkStyle default stroke:#94A3B8,stroke-width:1.5px
 ```
 
-The implementation divides responsibility among small modules so that **model choice, agent control flow, and workspace access can be examined separately**. `irina.loop.agent_loop` coordinates turns; `irina.provider.RemoteProvider` handles an OpenAI-compatible remote endpoint, while `irina.providers.qwen.QwenProvider` supplies the local trainable policy. `irina.tools.Tools` exposes file reading, writing, unique-snippet editing, listing, searching, and Docker-backed `bash`; its path checks resolve symlinks to enforce workspace containment. `irina.session.Session` stores JSONL events and snapshots, `irina.memory` reads `IRINA.md` (with `ODYSSEUS.md` fallback), `irina.skills` discovers `skills/*/SKILL.md`, and `irina.context.compact` applies a simple character budget. Delegation and concurrency are separate concerns: `irina.subagent.delegate` starts a child harness using the parent's workspace and policy, while `irina.fleet.run_fleet` coordinates independent jobs.
+The code is split so that **model generation, tool execution, and training can be inspected separately**. `irina.loop.agent_loop` handles the model–tool exchange. `RemoteProvider` uses a remote OpenAI-compatible endpoint; `QwenProvider` is the local model adapter used by the training pipeline. `Tools` implements file operations, search, and Docker-backed shell execution, with symlink-aware workspace path checks. `Session` writes JSONL events and conversation snapshots, while `memory.py` reads `IRINA.md` and `skills.py` discovers `skills/*/SKILL.md`. Skill discovery is present, but the current harness does not register a general-purpose skill-loading tool. Context trimming uses a character budget rather than model-generated summaries. Sub-agent and fleet modules are present; the default security policy, however, only recognizes the six built-in tool names, so additional tools require deliberate policy changes.
 
 ### The Evidence Trail: What Each Trajectory Preserves
 
@@ -482,9 +482,9 @@ The module interfaces below provide a **navigation map for contributors**: start
 
 Irina's safety boundary combines **workspace path checks, tool policy decisions, and optional Docker isolation**. File operations resolve paths and symlinks before enforcing workspace containment. When shell execution is enabled, model-generated commands run in a Docker container with networking disabled, capabilities dropped, a read-only container root, CPU/memory/PID limits, and a writable bind mount of the task repository. That bind mount means the agent can still modify or destroy files **inside** its assigned workspace; Docker is not a guarantee against every escape or misconfiguration. Use disposable checkouts without secrets or elevated privileges, and perform any network-dependent image or repository preparation through a separate trusted setup process.
 
-**Provenance is separate from functional similarity.** Because the original Odysseus source and license were not supplied, Irina does not claim source-level equivalence, a completed security audit, or preservation of every original behavior. A faithful port would require the original code, its licensing terms, and regression tests against the reference implementation. `VALIDATION.md` remains the source of truth for what has actually been tested in this distribution.
+The important distinction is between **code that exists and behavior that has been tested**. The repository contains a Docker sandbox implementation, a training pipeline, and a benchmark reward adapter, but the local validation record does not establish that they work together on a real benchmark task. Check `VALIDATION.md` before interpreting an architectural diagram or a CLI command as a verified result.
 
-## 11. Where Irina Goes Next: Extension Points and Research Priorities
+## 11. Next Engineering Steps: Recovery, Replay, and Benchmark Validation
 
 ```bash
 uv sync --extra dev
@@ -492,8 +492,8 @@ uv run pytest -q
 uv run python -m compileall -q src
 ```
 
-Irina is designed to be **extended at explicit boundaries**. Register a custom capability with `@tool(description, parameter='...')` and pass it through `Harness(extra_tools=[fn])`; then review the policy, since unknown tool names are denied by default. Useful next steps include stronger session-recovery tests, richer trajectory serialization for reproducible offline training, evaluator-version compatibility checks, and end-to-end Docker/GPU validation. Preserve the separation between reward backends and the agent loop so experiments remain comparable, and never expose SWE-bench reference solution patches to the policy.
+Custom functions can be registered with `@tool(description, parameter='...')` and passed through `Harness(extra_tools=[fn])`. They are **not automatically permitted**: `Policy.check` currently accepts only the six built-in names, so a custom tool also needs an explicit policy extension. The next practical work is to test Docker-backed rollouts on a real checkout, confirm the official evaluator's API and reports, and run a complete Qwen/LoRA update. After that, session recovery can be strengthened beyond completed snapshots, trajectory artifacts can capture enough token information for offline replay, and skills and delegated tools can be wired into the runtime. Keep benchmark solutions out of model prompts and training trajectories.
 
-## 12. Origins and Reuse: Attribution, Licensing, and Validation
+## 12. Reuse and Research Claims: Licenses, Evidence, and Validation
 
-Irina is an independently authored research prototype; no copy of the original Odysseus Python source has been verified in this distribution. The architecture's inspiration does not establish rights to relicense or redistribute third-party implementations. Check the actual licenses of any external code or assets before incorporating them, and use `VALIDATION.md` to distinguish demonstrated behavior from planned functionality.
+Check the repository's license and the licenses of any models, datasets, and external packages before redistributing a derived project. `VALIDATION.md` records which local checks passed and which model, Docker, and benchmark integrations still need to be exercised.
