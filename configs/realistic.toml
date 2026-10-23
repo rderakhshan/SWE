@@ -1,0 +1,4 @@
+mode = "realistic"
+group_size = 4
+max_turns = 4
+seed = 42
