@@ -92,6 +92,149 @@ flowchart TD
 
 The policy generates tool calls. Irina executes authorized calls against a real checkout and feeds observations back into the next policy prompt. Each rollout produces an actual Git diff. Educational rewards are **random**, not evidence of repair correctness. Realistic rewards are intended to be official benchmark outcomes. One task is sampled multiple times from the same starting policy, then token-level log probabilities are used to update LoRA adapters.
 
+### IRINA — Complete Agent Architecture & Execution Flow
+
+This revised diagram combines the full Irina agent harness into one continuous, top-down flowchart. It includes initialization, persistent memory, skills, session recovery, context compaction, model reasoning, tool security, workspace operations, sub-agents, and termination.
+
+The central execution loop is corrected: every subsequent model call passes through the context-budget check, and every decision has a defined outgoing path.
+
+```mermaid
+flowchart TD
+    START(["IRINA — Autonomous Coding Agent"])
+    START --> ENTRY{"Execution entry point"}
+
+    ENTRY -->|CLI| CLI["Parse CLI arguments and execution mode"]
+    ENTRY -->|Python API| API["Construct Harness instance"]
+    ENTRY -->|Fleet| FLEET["Schedule parallel agent jobs"]
+
+    CLI --> INIT
+    API --> INIT
+    FLEET --> WORKERS["Create independent job harnesses"]
+    WORKERS --> INIT
+
+    INIT["Initialize Irina Harness"]
+    INIT --> WORKDIR["Resolve and create working directory"]
+    WORKDIR --> CONFIG["Configure model, tool registry and security policy"]
+    CONFIG --> CORE["Register workspace tools and optional capabilities"]
+
+    CORE --> RESUME{"Resume previous session?"}
+
+    RESUME -->|Yes| LOAD["Load JSONL session history"]
+    LOAD --> REPAIR["Tolerate torn final line and repair missing tool results"]
+    REPAIR --> TASK
+
+    RESUME -->|No| NEW["Create session when persistence is enabled"]
+    NEW --> TASK["Receive task or continuation request"]
+
+    TASK --> MEMORY["Load project memory from IRINA.md"]
+    MEMORY --> SKILLS["Discover available skills"]
+    SKILLS --> SYSTEM["Assemble system prompt and tool declarations"]
+    SYSTEM --> APPEND["Append user message and persist when enabled"]
+
+    APPEND --> TURN{"Normal turns remaining?"}
+
+    TURN -->|Yes| TOKENS["Estimate conversation tokens"]
+    TOKENS --> COMPACT{"Compaction eligible?"}
+
+    COMPACT -->|Yes| SUMMARIZE["Summarize older messages using model"]
+    SUMMARIZE --> KEEP["Keep recent messages and remove orphaned tool results"]
+    KEEP --> MODEL
+
+    COMPACT -->|No| MODEL["Request model completion"]
+
+    MODEL --> PROVIDER["Provider sends system prompt, messages and tool schemas"]
+    PROVIDER --> RESPONSE["Receive model response and token usage"]
+    RESPONSE --> PARSE["Parse assistant text, function calls and signatures"]
+    PARSE --> ASSISTANT["Append assistant message and emit event"]
+
+    ASSISTANT --> CALLS{"Tool calls returned?"}
+
+    CALLS -->|No| FINAL["Prepare final response"]
+    CALLS -->|Yes| QUEUE["Process requested tool calls in order"]
+
+    QUEUE --> NEXTCALL{"Another tool call?"}
+
+    NEXTCALL -->|Yes| LOOKUP{"Known tool?"}
+    LOOKUP -->|No| UNKNOWN["Return ERROR: unknown tool"]
+    LOOKUP -->|Yes| POLICY["Evaluate security policy"]
+
+    POLICY --> DENY{"Dangerous command?"}
+    DENY -->|Yes| BLOCK["Return BLOCKED observation"]
+    DENY -->|No| MODE{"Policy mode"}
+
+    MODE -->|Read-only| READONLY{"Read-only operation?"}
+    READONLY -->|Yes| DISPATCH
+    READONLY -->|No| BLOCK
+
+    MODE -->|Safe| SAFE{"Read operation?"}
+    SAFE -->|Yes| DISPATCH
+    SAFE -->|No| APPROVE{"User approves operation?"}
+    APPROVE -->|Yes| DISPATCH
+    APPROVE -->|No| BLOCK
+
+    MODE -->|Yolo| DISPATCH{"Requested capability"}
+
+    DISPATCH -->|read_file| READ["Read numbered file contents"]
+    DISPATCH -->|write_file| WRITE["Create or overwrite file"]
+    DISPATCH -->|edit_file| EDIT["Replace exactly one matching snippet"]
+    DISPATCH -->|list_files / grep| SEARCH["Search repository files"]
+    DISPATCH -->|bash| SHELL["Execute command in workspace"]
+    DISPATCH -->|remember| REMEMBER["Append project memory"]
+    DISPATCH -->|use_skill| SKILL["Load SKILL.md instructions"]
+    DISPATCH -->|spawn_agent| DEPTH{"Sub-agent depth available?"}
+
+    DEPTH -->|Yes| CHILD["Construct child harness with fresh context"]
+    CHILD --> CHILD_RUN["Child executes delegated task"]
+    CHILD_RUN --> CHILD_REPORT["Return child final report"]
+
+    DEPTH -->|No| DEPTH_ERROR["Return depth-limit error"]
+
+    READ --> OBS
+    WRITE --> OBS
+    EDIT --> OBS
+    SEARCH --> OBS
+    SHELL --> OBS
+    REMEMBER --> OBS
+    SKILL --> OBS
+    CHILD_REPORT --> OBS
+    DEPTH_ERROR --> OBS
+    BLOCK --> OBS
+    UNKNOWN --> OBS
+
+    OBS["Capture tool result or exception as text"]
+    OBS --> TOOLMSG["Append tool observation and emit events"]
+    TOOLMSG --> SAVE["Persist observation when enabled"]
+    SAVE --> NEXTCALL
+
+    NEXTCALL -->|No| TURN
+
+    TURN -->|No| LAST["Final model completion with tools disabled"]
+    LAST --> LASTMSG["Append final assistant message"]
+    LASTMSG --> FINAL
+
+    FINAL --> SESSION_SAVE["Persist final message when enabled"]
+    SESSION_SAVE --> REPORT(["Return task result to caller"])
+
+    REPORT --> EXIT{"Execution mode"}
+    EXIT -->|CLI / API| DONE(["Task complete"])
+    EXIT -->|Fleet| AGG["Collect ordered job results"]
+    AGG --> DONE
+
+    classDef entry fill:#dbeafe,stroke:#2563eb,color:#1e3a8a,stroke-width:2px
+    classDef reasoning fill:#ede9fe,stroke:#7c3aed,color:#4c1d95,stroke-width:1.5px
+    classDef tools fill:#dcfce7,stroke:#16a34a,color:#14532d,stroke-width:1.5px
+    classDef safety fill:#ffedd5,stroke:#ea580c,color:#7c2d12,stroke-width:1.5px
+    classDef state fill:#f1f5f9,stroke:#64748b,color:#334155,stroke-width:1.5px
+    classDef decision fill:#fef3c7,stroke:#d97706,color:#78350f,stroke-width:1.5px
+
+    class START,CLI,API,FLEET,INIT,REPORT,DONE entry
+    class MODEL,PROVIDER,RESPONSE,PARSE,SUMMARIZE,LAST reasoning
+    class READ,WRITE,EDIT,SEARCH,SHELL,REMEMBER,SKILL,CHILD,CHILD_RUN,CHILD_REPORT tools
+    class POLICY,BLOCK,APPROVE safety
+    class WORKERS,WORKDIR,CONFIG,CORE,LOAD,REPAIR,NEW,TASK,MEMORY,SKILLS,SYSTEM,APPEND,TOKENS,KEEP,ASSISTANT,QUEUE,UNKNOWN,OBS,TOOLMSG,SAVE,LASTMSG,FINAL,SESSION_SAVE,AGG,DEPTH_ERROR state
+    class ENTRY,RESUME,TURN,COMPACT,CALLS,NEXTCALL,LOOKUP,DENY,MODE,READONLY,SAFE,DISPATCH,DEPTH,EXIT decision
+```
+
 ## 2. Install and diagnose
 
 Python 3.11 or 3.12 is recommended. `uv` is used for packaging and reproducibility. GPU is recommended for model-backed training. Docker must be installed, running, and accessible to the current user. Internet access is required for the SWE-bench dataset, source repositories, model weights, and Docker images.
