@@ -1,12 +1,12 @@
-# Irina — coding agent + SWE-bench Verified + local Qwen + GRPO
+# Irina — From Repository Repair to Learned Agent Behavior
 
-Irina is a **Python coding-agent research implementation** combining a small, readable tool-using harness with a SWE-bench Verified software-repair experiment and group-relative policy optimization (GRPO). The default `educational` mode runs the **real agent and policy-gradient code** but replaces expensive SWE-bench test verification with seeded synthetic rewards. `realistic` mode calls the official SWE-bench evaluator instead. The only intended difference between the modes is reward provenance.
+Irina connects three parts of coding-agent research in one Python project: a **readable agent harness** that operates on real repositories, a **SWE-bench Verified repair workflow** that produces candidate patches, and **group-relative policy optimization (GRPO)** that trains a local Qwen model from rollout rewards. Its two modes are designed to share the same agent and optimization path: `educational` substitutes seeded synthetic rewards for expensive benchmark verification, while `realistic` requests results from the official SWE-bench evaluator. This distinction makes the system useful both for studying the mechanics of agent training and for developing a correctness-based evaluation workflow. Synthetic rewards do **not** measure software-repair quality.
 
-> **Verification and provenance notice.** The uploaded material contained an architectural README and an implementation specification, **not the original Odysseus source**. This distribution therefore contains an independently implemented Irina harness that follows the documented design, not a line-for-line port or verified feature-preserving rename. Some documented original behaviors (notably crash-resume in the middle of a tool call, SSE browser approvals, and fully integrated subagent skill loading) are not reproduced. The full model-backed and official verifier-backed flows have **not been executed in the packaging environment**. This is a research implementation requiring external models, Docker, and dataset access, not a security-certified autonomous coding product.
+> **Verification and provenance notice.** Irina is an **independent implementation inspired by a supplied Odysseus architecture and specification**; the original Odysseus Python source was not provided. It is therefore neither a line-for-line port nor a verified feature-preserving rename. Some features described by that specification—including mid-tool-call crash recovery, SSE browser approvals, and complete sub-agent skill integration—are not reproduced. Neither the full model-backed training flow nor official SWE-bench verification was executed in the packaging environment. Treat Irina as an inspectable research prototype, not a benchmark-certified or security-certified coding agent; actual runs require suitable models, dataset access, and Docker infrastructure.
 
-## 1. SWE-bench + Odysseus + Qwen + GRPO — Full pipeline
+## 1. The Closed Loop: How a Repository Repair Becomes a Learning Signal
 
-*Odysseus denotes the original harness architecture; its implementation in this project is named Irina. The diagram below is reproduced verbatim from the supplied implementation prompt.*
+*This diagram follows the original Odysseus-inspired design, while the independently developed project is called Irina. The diagram is preserved exactly as supplied; references to “Odysseus” inside it denote the architectural origin, not a separate runtime or a claim of source-code equivalence.*
 
 ```mermaid
 flowchart TD
@@ -90,13 +90,13 @@ flowchart TD
     linkStyle default stroke:#94A3B8,stroke-width:1.5px
 ```
 
-The policy generates tool calls. Irina executes authorized calls against a real checkout and feeds observations back into the next policy prompt. Each rollout produces an actual Git diff. Educational rewards are **random**, not evidence of repair correctness. Realistic rewards are intended to be official benchmark outcomes. One task is sampled multiple times from the same starting policy, then token-level log probabilities are used to update LoRA adapters.
+The diagram connects **repository repair, evidence collection, and learning**. Qwen proposes actions; the Irina harness checks permissions, executes permitted tools against a task checkout, and returns observations for the next model turn. A rollout ends with a candidate Git diff, which is assessed by the selected reward backend. In `educational` mode, the seeded reward is **random and unrelated to patch correctness**; in `realistic` mode, the intended signal comes from independent SWE-bench verification. Multiple rollouts of the same task provide a comparison group, and the resulting advantages guide updates to Qwen's trainable LoRA parameters. This separation is a central design advantage: reward experiments need not change the agent's tool-execution logic.
 
-### IRINA — Complete Agent Architecture & Execution Flow
+### Inside the Agent: How Irina Turns Intent into Controlled Actions
 
-This revised diagram combines the full Irina agent harness into one continuous, top-down flowchart. It includes initialization, persistent memory, skills, session recovery, context compaction, model reasoning, tool security, workspace operations, sub-agents, and termination.
+This diagram describes the **agent harness as a system**, rather than only the benchmark-training pipeline. It traces entry through the CLI, Python API, or fleet scheduler; workspace and policy setup; optional session recovery; project memory and skill discovery; and the recurring model–tool interaction. The same architecture also provides bounded context, persistent execution records, and delegated work through sub-agents. Read it as the intended control flow of the harness, with the caveat that individual recovery and integration behaviors still require implementation-level verification.
 
-The central execution loop is corrected: every subsequent model call passes through the context-budget check, and every decision has a defined outgoing path.
+The key feedback path is **tool observation → context-budget check → next model completion**. Context compaction is conditional, not automatic: it is considered when the conversation grows beyond its budget and enough earlier messages exist to summarize. The diagram also distinguishes a normal model answer from the final, tools-disabled call used when the turn limit is exhausted. Its branches show intended decisions; they should not be read as evidence that every edge has been exercised end to end.
 
 ```mermaid
 flowchart TD
@@ -235,9 +235,9 @@ flowchart TD
     class ENTRY,RESUME,TURN,COMPACT,CALLS,NEXTCALL,LOOKUP,DENY,MODE,READONLY,SAFE,DISPATCH,DEPTH,EXIT decision
 ```
 
-## 2. Install and diagnose
+## 2. Establish the Runtime: Dependencies, Isolation, and Preflight Checks
 
-Python 3.11 or 3.12 is recommended. `uv` is used for packaging and reproducibility. GPU is recommended for model-backed training. Docker must be installed, running, and accessible to the current user. Internet access is required for the SWE-bench dataset, source repositories, model weights, and Docker images.
+Start with **Python 3.11 or 3.12** and `uv`, which manages the project environment and optional dependencies. A GPU is recommended for practical Qwen/LoRA training; a working Docker daemon is required by the configured isolated shell backend and realistic SWE-bench evaluation. Dataset downloads, model weights, source checkouts, and container images also require network access during setup. The `doctor` command checks prerequisites before you spend time on a rollout, while the test command checks the local Python implementation—not the full benchmark workflow.
 
 ```bash
 # After downloading/extracting this archive:
@@ -247,11 +247,11 @@ uv run irina-grpo doctor
 uv run pytest -q
 ```
 
-The lockfile may need refreshing for your platform with `uv lock`; see `VALIDATION.md` for what was actually tested. `uv sync --extra realistic` additionally installs the official SWE-bench package. Some SWE-bench versions may require version-specific evaluation adapter adjustments; the realistic backend is **not certified** without a full benchmark run.
+If dependency resolution differs on your machine, refresh the lockfile with `uv lock` and consult `VALIDATION.md` for the precise scope of existing checks. The optional `realistic` extra installs the official SWE-bench package, but installation alone does **not** establish compatibility with its evaluator API or report format. A trustworthy realistic run still needs a compatible evaluator release, functioning Docker infrastructure, and an end-to-end benchmark test.
 
-**Never add real API keys to `.env.example` or version control.** A previously supplied `.env` appeared to contain a credential; rotate it if active.
+**Keep credentials out of `.env.example`, notebooks, commits, and logs.** An earlier supplied `.env` appeared to contain a credential; if it is still active, rotate it. Local Qwen training does not require a commercial inference API key, whereas the optional remote-provider path may require credentials.
 
-## 3. Agent CLI
+## 3. Put Irina to Work: Inspect, Repair, Resume, and Delegate
 
 ```bash
 uv run irina --help
@@ -263,9 +263,9 @@ uv run irina -d ./my-project --mode yolo --docker -p 'Run the unit tests'
 uv run python -m irina.web -d ./my-project --port 3080
 ```
 
-Permission modes: `read-only` forbids writes and bash, `safe` asks for write/binary-command approval, and `yolo` authorizes allowed writes without prompts. Deny rules apply regardless of mode. Bash only executes if a `DockerSandbox` is explicitly configured. The default web interface is a **read-only local form**, not the original Odysseus SSE/approval UI.
+The agent CLI is the **interactive and scripted entry point** to the harness, distinct from the GRPO training CLI below. Use `read-only` for inspection, `safe` when write or command approval is appropriate, and `yolo` only in a disposable, controlled workspace; explicit deny rules still apply in every mode. Shell execution requires a configured `DockerSandbox`, so selecting `yolo` does not silently enable unrestricted host commands. The included web entry point exposes a **read-only local form**, not the original Odysseus SSE/approval interface.
 
-## 4. SWE-bench GRPO CLI
+## 4. Run the Learning Experiment: Tasks, Rollouts, and Checkpoints
 
 ```bash
 uv run irina-grpo doctor
@@ -276,13 +276,13 @@ uv run irina-grpo run --mode realistic --group-size 4
 uv run irina-grpo inspect <run-id>
 ```
 
-Default model: `Qwen/Qwen2.5-Coder-0.5B-Instruct`. Default mode: `educational`. Default group size: 4. Use `--model`, `--task-index`, `--instance-id`, `--seed`, and `--output-dir` to customize. The program writes `config.json`, `trajectory-N.json`, `patch-N.diff`, `summary.json`, and `lora_checkpoint/` under `runs/<run-id>/`.
+The GRPO CLI is the **experiment entry point**: by default it selects `Qwen/Qwen2.5-Coder-0.5B-Instruct`, `educational` rewards, and a group of four rollouts per task. Select a particular benchmark instance with `--task-index` or `--instance-id`, control reproducibility with `--seed`, and change the model or output location with `--model` and `--output-dir`. Each run groups its configuration, rollout trajectories, candidate diffs, summary, and LoRA checkpoint under `runs/<run-id>/` (`config.json`, `trajectory-N.json`, `patch-N.diff`, `summary.json`, `lora_checkpoint/`). These artifacts make experiments easier to inspect and compare, though they do not yet constitute a complete offline training replay record.
 
-**Operational caveat:** Training needs a compatible GPU/CPU memory budget. Realistic verification may download large container images, and its official evaluation API/report format must match the installed SWE-bench release. Failure to obtain a trustworthy report is an error, not a zero reward. No mock environment or fake model response is used by the real pipeline.
+**Operational caveat:** The training path needs sufficient model and optimizer memory, while realistic verification can require substantial disk space and Docker image downloads. The official evaluator's API and report format must match the installed SWE-bench release. If evaluation infrastructure fails, record an error rather than interpreting it as a patch that failed tests. The pipeline is designed around real model generations and workspaces; the `educational` mode substitutes only the **reward signal**, not a fake model response.
 
-## 5. Zoom in — What happens during one agent rollout?
+## 5. Anatomy of an Attempt: From Model Decision to Candidate Patch
 
-*Diagram reproduced verbatim from the supplied implementation prompt.*
+*This rollout diagram is retained verbatim from the supplied implementation prompt. It isolates the repeated model–tool exchange from the later reward and optimization stages.*
 
 ```mermaid
 flowchart TD
@@ -332,15 +332,15 @@ flowchart TD
     linkStyle default stroke:#94A3B8,stroke-width:1.5px
 ```
 
-`irina.loop.agent_loop` is the single orchestration loop. `irina.provider.RemoteProvider` supports an OpenAI-compatible remote endpoint; `irina.providers.qwen.QwenProvider` is the local trainable adapter. `irina.tools.Tools` implements `read_file`, `write_file`, `edit_file`, `list_files`, `grep`, and sandboxed `bash`. The path jail resolves symlinks before checking workspace containment. `irina.session.Session` records JSONL events and conversation snapshots. `irina.memory` loads `IRINA.md`, falling back to `ODYSSEUS.md`. `irina.skills` discovers `skills/*/SKILL.md`. `irina.context.compact` enforces a simple character budget. `irina.subagent.delegate` runs a child harness with the same workspace and policy. `irina.fleet.run_fleet` schedules independent harness jobs.
+The implementation divides responsibility among small modules so that **model choice, agent control flow, and workspace access can be examined separately**. `irina.loop.agent_loop` coordinates turns; `irina.provider.RemoteProvider` handles an OpenAI-compatible remote endpoint, while `irina.providers.qwen.QwenProvider` supplies the local trainable policy. `irina.tools.Tools` exposes file reading, writing, unique-snippet editing, listing, searching, and Docker-backed `bash`; its path checks resolve symlinks to enforce workspace containment. `irina.session.Session` stores JSONL events and snapshots, `irina.memory` reads `IRINA.md` (with `ODYSSEUS.md` fallback), `irina.skills` discovers `skills/*/SKILL.md`, and `irina.context.compact` applies a simple character budget. Delegation and concurrency are separate concerns: `irina.subagent.delegate` starts a child harness using the parent's workspace and policy, while `irina.fleet.run_fleet` coordinates independent jobs.
 
-### What a trajectory records
+### The Evidence Trail: What Each Trajectory Preserves
 
-Each rollout's JSON includes messages, generation events, tool calls/observations, stopping reason and reward status. The Qwen provider additionally retains generated token IDs and corresponding prompt token IDs **in memory** for the training step. Prompt and observation tokens are not included in the policy-gradient objective. Full token-level old log probabilities are recomputed before the optimizer update. The saved trajectory JSON does not currently serialize every token log probability; for exact training replay, persist that additional information before extending the implementation to distributed or offline GRPO.
+A trajectory is the **audit trail for one attempt at a repair**: its JSON records the conversation, generation events, requested tools, observations, stopping reason, and reward status. During training, the Qwen provider also retains generated and prompt token IDs **in memory**, allowing the optimizer to apply the policy-gradient objective to generated assistant tokens rather than prompt or tool-observation text. Old-policy token log probabilities are recomputed before the update. Because the JSON artifact does not serialize every token log probability, exact offline replay and distributed training would require a richer, versioned trajectory format.
 
-## 6. Zoom in — Two reward paths
+## 6. What Counts as Success? Synthetic Feedback Versus Verified Repairs
 
-*Diagram reproduced verbatim from the supplied implementation prompt; it describes the intended architecture, not a claim of end-to-end verification.*
+*The reward-path diagram is preserved verbatim. It distinguishes a low-cost synthetic learning signal from independent benchmark verification; it is an architectural description, not a claim that the official evaluator has been validated end to end.*
 
 ```mermaid
 flowchart TD
@@ -389,11 +389,11 @@ flowchart TD
     linkStyle default stroke:#94A3B8,stroke-width:1.5px
 ```
 
-Synthetic rewards are reproducible from the experiment seed and rollout ID. Realistic rewards require official SWE-bench resolution status. Infrastructure errors must not be treated as ordinary unresolved patches. The official verifier is independent of the agent's working tree.
+The two reward paths serve **different research questions**. Seeded synthetic rewards make it possible to inspect grouping, advantage calculation, backpropagation, and checkpoint creation without claiming that the agent repaired anything. Official SWE-bench resolution status is intended to provide correctness-based feedback from a **clean verification environment separate from the agent's working tree**. An evaluator crash, missing report, or container failure is not equivalent to a legitimate unresolved patch; keeping those cases distinct is essential for interpretable experiments.
 
-## 7. Zoom in — Grouped rollouts and the GRPO update
+## 7. Learning by Comparison: Turning Competing Attempts into Policy Updates
 
-*Diagram reproduced verbatim from the supplied implementation prompt.*
+*The grouped-rollout diagram is preserved verbatim. It shows how several attempts at the same task become one relative-learning update, rather than independent supervised examples.*
 
 ```mermaid
 flowchart TD
@@ -444,15 +444,15 @@ flowchart TD
     linkStyle default stroke:#94A3B8,stroke-width:1.5px
 ```
 
-For rewards `r_i`, compute `A_i = (r_i - mean(r)) / (std(r) + epsilon)`. All-zero variance groups produce zero advantages and no meaningful policy update. Each assistant generation contributes generated-token loss, with rollout advantage shared across its turns. The implementation uses a clipped PPO/GRPO-style surrogate and does **not** claim to reproduce every variant of published GRPO (for example, no reference-model KL is enabled by default). For production research, validate importance ratios and sequence weighting against your target GRPO formulation.
+GRPO uses **relative performance within a group of rollouts**, rather than treating a reward in isolation. For rewards `r_i`, the rollout advantage is `A_i = (r_i - mean(r)) / (std(r) + epsilon)`; a group with zero reward variance produces zero advantages and therefore no meaningful learning signal. The same rollout advantage is associated with generated assistant tokens across its turns, and a clipped PPO/GRPO-style objective updates the Qwen LoRA adapters. This implementation is deliberately a research approximation, **not a claim of equivalence to every published GRPO variant**: reference-model KL is not enabled by default, and importance ratios, sequence weighting, and update stability need explicit validation before drawing scientific conclusions.
 
-## 8. Google Colab
+## 8. Experiment in Colab: What Runs, What Requires Docker
 
-Open `notebooks/irina_grpo.ipynb`. It is a teaching notebook using the same Python pipeline as the CLI. Configure `REPO_URL` to the actual GitHub URL after publishing Irina. The default is `MODE = 'educational'`. Changing it to `realistic` selects the verifier backend; it does not install or enable Docker on Colab automatically. **Most hosted Colab runtimes do not provide a working Docker daemon**, so full isolated tool execution and realistic verification will fail closed until a supported runtime is provided. The notebook links to the four flowcharts defined in this README, because neither GitHub nor Colab renders Mermaid inside notebook markdown cells.
+Open `notebooks/irina_grpo.ipynb` to follow the **same pipeline through a teaching-oriented Colab interface**. Set `REPO_URL` to the published repository and begin with `MODE = 'educational'` to inspect the experiment configuration and training path. Switching to `realistic` changes the reward backend; it does **not** provision Docker or guarantee evaluator compatibility. **Typical hosted Colab runtimes lack a working Docker daemon**, which also prevents the current Docker-backed agent shell tool from completing full rollouts there. Use a Docker-enabled GPU environment for that workflow, or develop a separately validated educational execution backend. The notebook references the README flowcharts because Mermaid fences in notebook Markdown are not rendered natively by Colab.
 
-## 9. Module-by-module API guide
+## 9. Find Your Way Through the Code: Interfaces and Responsibilities
 
-Each Python module begins with a comprehensive module docstring identifying its goal, inputs, output types, and a usage example. Important interfaces:
+The module interfaces below provide a **navigation map for contributors**: start at `Harness.run` for task execution, follow `agent_loop` into provider and tool calls, or start at `rl/pipeline.py` for grouped training runs. Each module's documentation describes its purpose, inputs, outputs, and a usage example. The table summarizes the intended API boundaries without implying that every integration path has been benchmark-verified:
 
 | Module | Main interface | Inputs → outputs |
 |---|---|---|
@@ -478,13 +478,13 @@ Each Python module begins with a comprehensive module docstring identifying its 
 | `rl/pipeline.py` | `run_pipeline` | Config → summary dict + files |
 | `rl/cli.py` | `main` | command-line flags → JSON output |
 
-## 10. Security model and limitations
+## 10. Boundaries of Autonomy: Permissions, Isolation, and Trust
 
-The agent reads and writes only inside a resolved workspace path. Symlink traversal outside the workspace is blocked. Model-generated shell commands are executed through Docker with network disabled, capabilities dropped, a read-only container root, memory/CPU/PID limits, and a read/write bind mount of the task repository. **Docker configuration is not a guarantee against all container escapes.** Never point Irina at a repository containing valuable secrets or give its container elevated privileges. Docker image provisioning, dependencies and repository setup may require additional trusted preparation steps; the agent sandbox itself has network disabled.
+Irina's safety boundary combines **workspace path checks, tool policy decisions, and optional Docker isolation**. File operations resolve paths and symlinks before enforcing workspace containment. When shell execution is enabled, model-generated commands run in a Docker container with networking disabled, capabilities dropped, a read-only container root, CPU/memory/PID limits, and a writable bind mount of the task repository. That bind mount means the agent can still modify or destroy files **inside** its assigned workspace; Docker is not a guarantee against every escape or misconfiguration. Use disposable checkouts without secrets or elevated privileges, and perform any network-dependent image or repository preparation through a separate trusted setup process.
 
-The original Odysseus source and license were not supplied; this project does **not** claim that its source was copied, audited, or that every original feature was preserved. A complete faithful port requires the actual source and baseline regression tests. Consult `VALIDATION.md` before treating this code as a production release.
+**Provenance is separate from functional similarity.** Because the original Odysseus source and license were not supplied, Irina does not claim source-level equivalence, a completed security audit, or preservation of every original behavior. A faithful port would require the original code, its licensing terms, and regression tests against the reference implementation. `VALIDATION.md` remains the source of truth for what has actually been tested in this distribution.
 
-## 11. Development and extension
+## 11. Where Irina Goes Next: Extension Points and Research Priorities
 
 ```bash
 uv sync --extra dev
@@ -492,8 +492,8 @@ uv run pytest -q
 uv run python -m compileall -q src
 ```
 
-Use `@tool(description, parameter='...')` to describe custom functions. Supply them through `Harness(extra_tools=[fn])`; the default security policy rejects unrecognized tool names, so extend the policy deliberately before enabling a new custom tool. Keep reward backends separate from the agent loop. Do not expose SWE-bench reference solution patches to the policy.
+Irina is designed to be **extended at explicit boundaries**. Register a custom capability with `@tool(description, parameter='...')` and pass it through `Harness(extra_tools=[fn])`; then review the policy, since unknown tool names are denied by default. Useful next steps include stronger session-recovery tests, richer trajectory serialization for reproducible offline training, evaluator-version compatibility checks, and end-to-end Docker/GPU validation. Preserve the separation between reward backends and the agent loop so experiments remain comparable, and never expose SWE-bench reference solution patches to the policy.
 
-## 12. License and provenance
+## 12. Origins and Reuse: Attribution, Licensing, and Validation
 
-This independently authored prototype contains no verified copy of the original Odysseus Python source. Do not infer permission to relicense or redistribute third-party source without checking its actual license. See `VALIDATION.md` for explicit testing status.
+Irina is an independently authored research prototype; no copy of the original Odysseus Python source has been verified in this distribution. The architecture's inspiration does not establish rights to relicense or redistribute third-party implementations. Check the actual licenses of any external code or assets before incorporating them, and use `VALIDATION.md` to distinguish demonstrated behavior from planned functionality.
